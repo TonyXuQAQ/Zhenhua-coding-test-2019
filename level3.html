@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+
+.axis line, .axis tick, .axis path{
+  display: none;
+}
+
+.axis text{
+  font-size: 8px;
+}
+ 
+.legendAxis path, .legendAxis tick, .legendAxis line {
+      fill: none;
+      stroke: none;
+}
+
+</style>
+<svg width="1280" height="600"></svg>
+<script src="//d3js.org/d3.v4.min.js"></script>
+<script>
+
+/***********Basic layout*************/
+var svg = d3.select("svg"),
+    width = +svg.attr("width"),
+    height = +svg.attr("height");
+
+var forceWidth = width / 3;
+var forceHeight = height;
+var color = d3.scaleOrdinal(d3.schemeCategory20);
+
+// constructe the force graph
+var simulation = d3.forceSimulation()
+    .force("charge", d3.forceManyBody().strength(-100))
+    .force("link", d3.forceLink().id(function(d) { return d.id; }).distance(100))
+    .force("x", d3.forceX(forceWidth / 2))
+    .force("y", d3.forceY(forceHeight / 2))
+    .force("collision",d3.forceCollide().radius(function(d,i){
+    return 1.2 * (coAuthorNum[i][1] + 2.5);
+  }))// avoid overlap between different nodes
+    .on("tick",ticked);
+
+
+var link = svg.selectAll(".edge"),
+    node = svg.selectAll(".node");
+
+/************Read in json file*****************/
+d3.json("HKUST_coauthor_graph.json", function(error, graph) {
+  if (error) throw error;
+  coAuthorNum = []
+  coAuthorCounter = 0
+  for(var i=0;i<graph.nodes.length;i++){
+    if(graph.nodes[i].dept!="CSE"){
+      graph.nodes.splice(i,1); // remove professors that are not in CSE
+      i -= 1;
+    }
+    else{
+      graph.nodes[i].num = i;
+    }
+  }
+
+  for(var i=0;i<graph.nodes.length;i++){
+      for(var j=0;j<graph.edges.length;j++){
+          if(graph.edges[j].source == graph.nodes[i].id){
+            for(var k=0;k<graph.nodes.length;k++){
+              if(graph.edges[j].target == graph.nodes[k].id){
+                  coAuthorCounter += 1; // calculate the number of coauthor of every professor
+                  graph.edges[j].CSE = 1; // this professor has at least one coauthor
+              }
+            }
+          }
+          if(graph.edges[j].target == graph.nodes[i].id){
+            for(var k=0;k<graph.nodes.length;k++){
+              if(graph.edges[j].source == graph.nodes[k].id){
+                  coAuthorCounter += 1;
+                  graph.edges[j].CSE = 1;
+              }
+            }
+          }
+      }
+      coAuthorNum.push([graph.nodes[i].id,coAuthorCounter])
+      coAuthorCounter = 0;
+  }
+  for(var i=0;i<graph.edges.length;i++){
+    if(graph.edges[i].CSE!=1){
+      graph.edges.splice(i,1); // only consider edges linking two CSE professors
+      i -= 1;
+    }
+  }
+
+  // define edges
+  link = link.data(graph.edges)
+    .enter()
+    .append("line")
+    .attr("class", "edge")
+    .attr("stroke","#f0f0f0")
+    .attr("stroke-width","2px");
+
+  // define nodes 
+  node = node
+    .data(graph.nodes)
+    .enter().append("circle")
+    .attr("class", "node")
+    .attr("r", function(d,i){ // larger r means more coauthor 
+        if(coAuthorNum[i][1]!=0){
+          d.r = 1.2 * (coAuthorNum[i][1] + 2.5);
+          return 1.2 * (coAuthorNum[i][1] + 2.5);
+        }
+        else{
+          d.r = 0;
+          return 0;} 
+      })
+    .style("fill", function(d,i) { 
+        d.color = color(d.id%20);
+        return color(d.id%20);
+      })
+    .call(d3.drag().on("start", dragstarted) //d3.drag() creats interaction animation
+                      .on("drag", dragged)
+                      .on("end", dragended))
+    .on("mouseover",function(){ 
+                  chosenID = 0;
+                  d3.select(this) // mouseover node, show the professor's name and coauthor number
+                    .attr("stroke",function(d){ chosenID = d.num; return d3.rgb(d.color).darker(2)})
+                    .attr("stroke-width","3px")
+                    .style("fill",function(d){ return d3.rgb(d.color).darker(-0.5)})
+                    .append("svg:title")
+                    .text(function(d){
+                      num = 0;
+                      for(var i=0;i<coAuthorNum.length;i++){
+                        if(d.id == coAuthorNum[i][0]){
+                          num = coAuthorNum[i][1];
+                          break;
+                        }
+                      }
+                      return d.fullname + "; Coauthor Num: " + num;
+                    })
+
+                  d3.selectAll(".matrix") // highlight corresponding matrix units (by adding edging)
+                    .attr("stroke",function(d){
+                      if((parseInt(d/authorNum)==chosenID)||(d%authorNum==chosenID)){return d3.rgb(colorMatrix(getCoPaperNum(d))).darker(1);}
+                        return "none";
+                    })
+      })
+     .on("mouseout",function(){
+          d3.select(this)
+            .attr("stroke","none")
+            .style("fill",function(d){ return d.color;});
+
+          d3.selectAll(".matrix")
+                    .attr("stroke","none")
+      });
+  simulation.nodes(graph.nodes);
+  simulation.force("link").links(graph.edges);
+
+  // draw the matrix
+  authorNum = graph.nodes.length;
+  margin = {top : 100,left : forceWidth + 150,right : 20, bottom : 20};
+  gridSize = Math.min(height - margin.top - margin.bottom, width - margin.left - margin.right) / authorNum;
+  cellSize = gridSize * 0.8;
+  // color
+  colorMatrix = d3.scaleLinear()
+                .domain([0, 20, 80])
+                .range(["#deebf7","#4292c6","#053061"])
+                .interpolate(d3.interpolateRgb)
+
+  svg.selectAll("rect")
+      .data(d3.range(authorNum * authorNum))
+      .enter()
+      .append("rect")
+      .attr("class","matrix")
+      .attr("x",function(d,i){
+        return gridSize * parseInt(i/authorNum + 1) - cellSize;
+      })
+      .attr("y",function(d,i){
+        return gridSize * (i%authorNum + 1) -cellSize;
+      })
+      .attr("width",cellSize)
+      .attr("height",cellSize)
+      .attr("transform","translate("+ margin.left +","+ margin.top +")")
+      .style("fill",function(d,i){
+        if(getCoPaperNum(i)!=0){
+            d.color = colorMatrix(getCoPaperNum(i))
+            return colorMatrix(getCoPaperNum(i));
+          }
+        d.color = "#f7f7f7";
+        return "#f7f7f7";
+      })
+      .on("mouseover",function(){
+
+        chosenNum = 0
+        d3.select(this)
+          .append("svg:title")
+                    .text(function(d){
+                      chosenNum = d;
+                      return "Num: " + getCoPaperNum(d);
+                    })
+        d3.selectAll(".edge")
+          .attr("stroke",function(d){ 
+            colNum = parseInt(chosenNum/authorNum);
+            rowNum = chosenNum%authorNum;
+              if(((d.target.id==graph.nodes[colNum].id)&&(d.source.id==graph.nodes[rowNum].id))
+              ||((d.target.id==graph.nodes[rowNum].id)&&(d.source.id==graph.nodes[colNum].id))){
+               d3.select(this).raise();
+           }
+               d3.selectAll(".node") // highlight corresponding nodes and edge
+                  .style("fill",function(d){ 
+                    if((d.num==colNum)||(d.num==rowNum)){
+                      return d3.rgb(d.color).darker(-0.5);
+                    }
+                    else{
+                      return d3.color;
+                    }
+                  })
+                  .attr("stroke",function(d){
+                    if((d.num==colNum)||(d.num==rowNum)){
+                      d3.select(this).raise()
+                      return d3.rgb(d.color).darker(2);
+                    }
+                    else{
+                      return "none";
+                    }
+                  })
+                  .attr("stroke-width","3px")
+            if(((d.target.id==graph.nodes[colNum].id)&&(d.source.id==graph.nodes[rowNum].id))
+              ||((d.target.id==graph.nodes[rowNum].id)&&(d.source.id==graph.nodes[colNum].id))){
+               return "#969696";
+            }
+            return "#f0f0f0";
+        })
+          .attr("stroke-width","2px")
+
+
+      })
+      .on("mouseout",function(){
+
+          d3.selectAll(".edge")
+          .attr("stroke","#f0f0f0")
+          .attr("stroke-width","2px")
+          .raise()
+
+          d3.selectAll(".node")
+          .attr("stroke","none")
+          .style("fill",function(d){return d.color})
+          .raise()
+      })
+    // matrix axis
+    xyScale = d3.scaleLinear()
+                .domain([0,authorNum-1])
+                .range([gridSize - cellSize / 2,gridSize * authorNum - cellSize / 2])
+
+    authorName = []
+    for(var i=0;i<graph.nodes.length;i++){
+      authorName.push(graph.nodes[i].fullname);
+    }
+
+    var xAxis = d3.axisTop()
+              .scale(xyScale)
+              .tickFormat(function(d,i){
+                return authorName[i];
+              })
+              .ticks(authorNum)
+    
+    var gAxis=svg.append("g")
+                  .attr("class","axis")
+                  .attr("transform","translate("+ margin.left +","+ margin.top + ")")
+                  .call(xAxis)
+                  .selectAll("text")
+                     .attr("transform","rotate(60)translate("+ (-gridSize) +",0)")
+                     .attr("dy",gridSize)
+                     .style("text-anchor", "end");
+
+    var yAxis = d3.axisLeft()
+              .scale(xyScale)
+              .tickFormat(function(d,i){
+                return authorName[i];
+              })
+              .ticks(authorNum)
+    
+    var gAxis=svg.append("g")
+                  .attr("class","axis")
+                  .attr("transform","translate("+ margin.left +","+ margin.top + ")")
+                  .call(yAxis);
+
+    // create the legend of the matrix
+    var legendHeight = 8;
+    var legendWidth = 10;
+    maxCoPaper = 0;
+    for(var i=0;i<graph.edges.length;i++){
+      maxCoPaper = Math.max(maxCoPaper,graph.edges[i].publications.length);
+    }
+    var legend = svg.append('g')
+                  .attr('class',"legend")
+
+    legendColorLinear = d3.scaleLinear().domain([0, 40]).range([0, maxCoPaper]);
+    legend.selectAll(".legendRect")
+              .data(d3.range(30))
+              .enter()
+              .append("rect")
+              .attr("class","legendRect")
+              .attr("x", margin.left + gridSize * authorNum + 50)
+              .attr("y",function(d,i){
+                return height * 0.7 - i * legendHeight;
+              })
+              .attr("width",legendWidth)
+              .attr("height",legendHeight)
+              .style("fill",function(d,i){
+                return colorMatrix(legendColorLinear(i));
+              });
+
+    var legendYScale = d3.scaleLinear()
+               .range([legendHeight * 30,0])
+               .domain([0, maxCoPaper])
+
+    var legendYAxis = d3.axisRight()
+          .ticks(4)
+          .scale(legendYScale)
+          .tickFormat(function(d){
+            return d;
+          });
+
+    legend.append("g")
+        .attr("class", "legendAxis")
+        .attr("transform", "translate("+ (margin.left + gridSize * authorNum + 50 + legendWidth) +","+ (height * 0.7 - 29 * legendHeight) +")")
+        .call(legendYAxis);
+
+    function getCoPaperNum(i){
+        for(var j=0;j<graph.edges.length;j++){
+            if((
+              (graph.edges[j].source.id==graph.nodes[parseInt(i/authorNum)].id)&&(graph.edges[j].target.id==graph.nodes[i%authorNum].id)
+                )||(
+              (graph.edges[j].target.id==graph.nodes[parseInt(i/authorNum)].id)&&(graph.edges[j].source.id==graph.nodes[i%authorNum].id)
+                )){ return graph.edges[j].publications.length;}
+        }
+              return 0;
+      }
+
+});
+
+function ticked() {
+  link.attr("x1", function(d) { return Math.max(d.source.r + 10, Math.min(forceWidth - d.source.r, d.source.x)) - 5; })
+      .attr("y1", function(d) { return Math.max(d.source.r + 10, Math.min(forceHeight - d.source.r, d.source.y)) - 5; })
+      .attr("x2", function(d) { return Math.max(d.target.r + 10, Math.min(forceWidth - d.target.r, d.target.x)) - 5; })
+      .attr("y2", function(d) { return Math.max(d.target.r + 10, Math.min(forceHeight - d.target.r, d.target.y)) - 5; });
+
+  node.attr("cx", function(d) { return Math.max(d.r + 10, Math.min(forceWidth - d.r, d.x)) - 5; })
+      .attr("cy", function(d) { return Math.max(d.r + 10, Math.min(forceHeight - d.r, d.y)) - 5; })
+}
+
+function dragstarted(d) {
+  if (!d3.event.active) simulation.alphaTarget(0.3).restart();//设置目标α
+      d.fx = d.x;
+      d.fy = d.y;
+}
+ 
+function dragged(d) {
+      d.fx = d3.event.x;
+      d.fy = d3.event.y;
+}
+ 
+function dragended(d) {
+  if (!d3.event.active) simulation.alphaTarget(0);
+      d.fx = null;
+      d.fy = null;
+}
+
+
+</script>

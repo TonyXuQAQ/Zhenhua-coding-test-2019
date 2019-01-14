@@ -1,0 +1,311 @@
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Level Two</title>
+	<style> 
+		.legendAxis path, .legendAxis tick, .legendAxis line {
+          fill: none;
+          stroke: none;
+    }
+    .pathMax {
+	    fill: none;
+	    stroke: blue;
+	    stroke-width: 2;
+	}
+	.pathMin {
+	    fill: none;
+	    stroke: #74a9cf;
+	    stroke-width: 2;
+	}
+	</style>
+	<script src="http://d3js.org/d3.v4.min.js" charset="utf-8"></script>
+</head>
+
+<body>
+	<script type="text/javascript">
+
+		/**************Basic layout*****************/
+		colorScheme = ["#084594","#ffff99","#e31a1c","#d9d9d9","#636363"]
+		var margin = {top:20, right:120, bottom:40, left:50}
+		var height = 800;
+		var width = 1200;
+
+		var svg = d3.select("body")
+				.append("svg")
+				.attr("width",width)
+				.attr("height",height);
+		//d3.select('svg').style("background-color","steelblue")
+		/*************Read in CSV file************/
+		d3.csv('temperature_daily.csv',function(response){
+
+			var data = response.map(function(item){
+				var temp = [];
+				temp.date = item.date;
+				temp.minT = parseInt(item.min_temperature); // Must transfer string into int!!!
+				temp.maxT = parseInt(item.max_temperature);
+				return temp
+			})
+
+			/************************************************
+			 Extract max and min temperature of each month,
+			 and record them seperately in minTemp and maxTemp.
+			*************************************************/
+			var maxTemp = new Array();
+			var minTemp = new Array();
+			var maxRecord = new Array();
+			var minRecord = new Array();
+			var allRecord = new Array();
+			var tempDate = new Array();
+			maxNow = parseInt(data[0].maxT);
+			minNow = parseInt(data[0].minT);
+			yearNum = 0;
+			yearNow = data[0].date.split("-")[0];
+			monthNow = data[0].date.split("-")[1];
+			date = [];
+			for(var i = 0;i<data.length;i++){
+				datePre = date;
+				date = data[i].date.split("-");
+				if(monthNow!=date[1]){ 
+				// when now month != month, record info in arries
+					maxTemp.push(maxNow);
+					minTemp.push(minNow);
+					tempDate.push([datePre[0] + '-' + datePre[1],maxNow,minNow])
+					allRecord.push([maxRecord,minRecord]);
+					minRecord = [];
+					maxRecord = [];
+					maxNow = data[i].maxT;
+					minNow = data[i].minT;
+					monthNow = date[1];
+					if(yearNow!=date[0]){
+						yearNow = date[0];
+						yearNum += 1;
+					}
+				}
+				else{
+					maxRecord.push([parseInt(date[2]),data[i].maxT]);
+					minRecord.push([parseInt(date[2]),data[i].minT]);
+					if(maxNow<data[i].maxT){
+						maxNow = data[i].maxT; //find max temperature in a month
+					}
+					if(minNow>data[i].minT){
+						minNow = data[i].minT; //find min temperature in a month
+					}
+				}
+			}
+			yearNum += 1
+
+			/**************************************
+			Generating heatmap
+			***************************************/
+			xGridSize = Math.floor(width / yearNum);
+			yGridSize = Math.floor(height / 12);
+			//12 montes in a year and there are "yearNum" years in the dataset
+			xCellSize = xGridSize * 0.7; // leave intervals whose length is 0.3*xCellSize
+			yCellSize = yGridSize * 0.8; // same proportion as x
+			firstYear = data[0].date.split("-")[0]
+   		    lastYear = firstYear + yearNum;
+
+   		    // initialization of curves
+   		    curveXScale = d3.scaleLinear()
+   		    				.domain([0,32])
+   		    				.range([0,xCellSize]); // x axis linear scale for curves
+   		    curveYScale = d3.scaleLinear()
+   		    				//.domain([Math.min.apply(Math,minTemp),Math.max.apply(Math,maxTemp)])
+   		    				.domain([0,Math.max.apply(Math,maxTemp)])
+   		    				.range([yCellSize,0]); // y axis linear scale for curves
+   		    allRecordLong = [];
+   		    for(var i = 0;i<allRecord.length;i++){
+   		    	for(var j = 0;j<allRecord[i][0].length;j++){
+   		    		allRecord[i][0][j][0] = curveXScale(allRecord[i][0][j][0]);
+   		    		allRecord[i][0][j][1] = curveYScale(allRecord[i][0][j][1]);
+   		    		allRecord[i][1][j][0] = curveXScale(allRecord[i][1][j][0]);
+   		    		allRecord[i][1][j][1] = curveYScale(allRecord[i][1][j][1]);
+   		    	}
+   		    	allRecordLong.push(allRecord[i][0]);
+   		    }
+   		    for(var i = 0;i<allRecord.length;i++){
+				allRecordLong.push(allRecord[i][1]);
+   		    }
+   		    var xScale = d3.scaleLinear()
+							.domain([0.2,yearNum])
+							.range([0,width - margin.left - margin. right]);
+			var yScale = d3.scaleLinear()
+							.domain([0.2,12])
+							.range([0,height - margin.top - margin.bottom])
+
+   		    // color
+   		    var color=d3.scaleLinear()
+                .domain([0, 20, 40])
+                .range([colorScheme[0] , colorScheme[1] , colorScheme[2]])
+                .interpolate(d3.interpolateRgb)
+
+			// bars	
+   		    var bars = svg.selectAll('rect')
+   		    			.data(tempDate)
+   		    			.enter()
+   		    			.append('rect')
+   		    			.attr("class","tempRect")
+   		    			.attr('width',xCellSize)
+   		    			.attr('height',yCellSize)
+   		    			.attr('x',function(d,i){
+   		    				return xScale(parseInt(i / 12 + 1)) - xCellSize / 2;
+   		    			})
+   		    			.attr('y',function(d,i){
+   		    				return yScale(i%12 + 1) - yCellSize / 2;
+   		    			})
+   		    			.attr('fill',function(d,i){
+   		    				return color(maxTemp[i]);
+   		    			})
+   		    			.attr("transform","translate("+ margin.left +","+ margin.top +")")
+   		    			.on("mouseover",function(){
+   		    				d3.select(this)
+   		    					.append("svg:title")
+   		    					.text(function(d){
+   		    						return "Date: " + d[0] + " Max: " + d[1] + " Min: " + d[2];
+   		    					})
+   		    			})
+
+   		    // generating curves
+			var lineGenerator = d3.line(); 
+			svg.selectAll("path")
+				.data(allRecordLong)
+				.enter()
+				.append("path")
+				.attr('d',function(d,i){
+					return lineGenerator(d);
+				})
+				.attr("class",function(d,i){
+					if(i>=allRecord.length){
+						return "pathMin";
+					}
+					else{
+						return "pathMax";
+					}
+				})
+				.attr("transform", function(d,i){
+					if(i>=allRecord.length){
+						i = i - allRecord.length;
+					}
+					return "translate(" + (margin.left + xScale(parseInt(i / 12 + 1)) - xCellSize / 2 ) + "," + (margin.top + yScale(i%12 + 1) - yCellSize / 2) + ")" ;
+				});
+			// axis
+			var yearAxis = Array.from(Array(yearNum).keys()).map(i => parseInt(firstYear) + i);
+			
+
+			var xAxis = d3.axisTop()
+							.scale(xScale)
+							.tickFormat(function(d,i){
+								return yearAxis[i]
+							})
+							.tickSizeOuter(0);
+			var gAxis=svg.append("g").attr("class","axis").attr("transform","translate("+ margin.left +","+ (margin.top + yScale(1) - yGridSize / 2) + ")").call(xAxis);
+
+
+			monthAxis = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+			var yAxis = d3.axisLeft()
+							.scale(yScale)
+							.tickFormat(function(d,i){
+								return monthAxis[i];
+							})
+							.tickSizeOuter(0);
+
+			var gAxis=svg.append("g").attr("class","axis").attr("transform","translate("+ (margin.left + xScale(1) - xGridSize / 2) +","+ margin.top +")").call(yAxis);
+   		    // legend
+   		    var legendHeight = 10;
+   		    var legnedWidth = 30;
+   		    var legend = svg.append('g')
+   		    				.attr('class',"legend")
+   		    				.attr("transform","translate("+ (margin.left + xScale(yearNum + 1) - 50) +",0)");
+   		    legendColorLinear = d3.scaleLinear().domain([0, 50]).range([0, 40]);
+   		    legend.selectAll("rect")
+   		    		.data(d3.range(50))
+   		    		.enter()
+   		    		.append("rect")
+   		    		.attr("class","legendRect")
+   		    		.attr("x",0)
+   		    		.attr("y",function(d,i){
+   		    			return height * 0.7 - i * legendHeight;
+   		    		})
+   		    		.attr("width",legnedWidth)
+   		    		.attr("height",legendHeight)
+   		    		.style("fill",function(d,i){
+   		    			return color(legendColorLinear(i));
+   		    		});
+
+   		    var legendYScale = d3.scaleLinear()
+						   .range([legendHeight * 50,0])
+						   .domain([0,40])
+
+			var celsius = '\u2103'
+			var legendYAxis = d3.axisRight()
+			    .ticks(4)
+			    .scale(legendYScale)
+			    .tickFormat(function(d){
+			    	return d + celsius;
+			    });
+
+			legend.append("g")
+			  .attr("class", "legendAxis")
+			  .attr("transform", "translate("+ legnedWidth +","+ (height * 0.7 - 49 * legendHeight) +")")
+			  .call(legendYAxis);
+
+
+   		    MaxminFlag = 0;
+   		    // interaction
+   		    // create a switch button
+   		    svg.append("rect")
+   		    	.attr("class","switchButton")
+   		    	.attr("width",70)
+   		    	.attr("height",40)
+   		    	.attr("x",function(d,i){
+   		    		return xScale(yearNum) + 100 ;
+   		    	})
+   		    	.attr('y',function(d,i){
+   		    		return yScale(12);
+   		    	})
+   		    	.attr("fill",colorScheme[3])
+   		    	.on("mouseover",function(){
+   		    		d3.select(this)
+   		    			.attr("fill",colorScheme[4]);
+   		    	})
+   		    	.on("mouseout",function(){
+   		    		d3.select(this)
+   		    			.attr("fill",colorScheme[3]);
+   		    	})
+   		    	.on("click",function(){
+   		    		if(MaxminFlag == 0){
+   		    			svg.selectAll('.tempRect')
+   		    				.attr("fill",function(d,i){
+   		    					return color(minTemp[i]);
+   		    				});
+						svg.select('.switchButtonText')
+							.text('now Min');
+						MaxminFlag = 1;
+   		    		}
+   		    		else{
+   		    			svg.selectAll('.tempRect')
+   		    				.attr("fill",function(d,i){
+   		    					return color(maxTemp[i]);
+   		    				});
+						svg.select('.switchButtonText')
+							.text('now Max');
+						MaxminFlag = 0;
+   		    		}
+   		    		
+   		    	})
+
+   		    	svg.append("text")
+   		    	.attr("class","switchButtonText")
+   		    	.attr("x",function(d,i){
+   		    		return xScale(yearNum) + 105 ;
+   		    	})
+   		    	.attr('y',function(d,i){
+   		    		return yScale(12) + 25 ;
+   		    	})
+   		    	.text("now Max")
+   		    	.attr("font-size","14px")
+   		    	.attr("fill","black");
+		}) 
+	</script>
+</body>
+</html>
